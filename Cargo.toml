@@ -1,7 +1,10 @@
 [package]
-name = "av-mpegts"
+name = "av-mpeg-ts"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+av-data = "0.4.4"
+av-format = "0.7.1"
+log = "0.4.34"
 mpeg-ts = "0.6.2"
