@@ -4,8 +4,12 @@ version = "0.1.0"
 edition = "2024"
 
 [[example]]
-name = "hlsreader_simple"
+name = "hls_reader_simple"
 path = "examples/hls_reader/hls_reader_simple.rs"
+
+[[example]]
+name = "hls_reader_events"
+path = "examples/hls_reader/hls_reader_events.rs"
 
 [dependencies]
 av-data = "0.4.4"

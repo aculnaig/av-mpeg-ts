@@ -1,15 +1,10 @@
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 
 use av_data::{
-    params::{AudioInfo, CodecParams, MediaKind, VideoInfo},
-    rational::Rational64,
+    packet::Packet, params::{AudioInfo, CodecParams, MediaKind, VideoInfo}, rational::Rational64,
 };
 use av_format::{
-    buffer::Buffered,
-    common::GlobalInfo,
-    demuxer::{Demuxer, Descr, Descriptor, Event},
-    error::Result,
-    stream::Stream,
+    buffer::Buffered, common::GlobalInfo, demuxer::{Demuxer, Descr, Descriptor, Event}, error::{Error, Result}, stream::Stream,
 };
 use mpeg_ts::{OwnedTsPacket, TsPacket, ts::SectionReassembler};
 
@@ -18,7 +13,8 @@ pub struct MpegTsDes {
 }
 
 pub struct MpegTsDemuxer {
-    pending_packets: VecDeque<OwnedTsPacket>,
+    _pending_packets: VecDeque<OwnedTsPacket>,
+    pid_to_stream_index: HashMap<u16, usize>,
 }
 
 impl Demuxer for MpegTsDemuxer {
@@ -87,8 +83,6 @@ impl Demuxer for MpegTsDemuxer {
                                     delay: 0,
                                 };
 
-                                let mut supported = true;
-
                                 match stream_type {
                                     0x1B => {
                                         log::trace!(
@@ -118,20 +112,22 @@ impl Demuxer for MpegTsDemuxer {
                                         }));
                                     }
                                     _ => {
-                                        supported = false;
                                         unimplemented!();
                                     }
                                 }
 
-                                if supported {
-                                    let timebase = Rational64::new(1, 90_000);
-                                    let mut stream = Stream::from_params(&params, timebase);
+                                let timebase = Rational64::new(1, 90_000);
+                                let mut stream = Stream::from_params(&params, timebase);
 
-                                    stream.id = elementary_pid as isize;
-                                    stream.index = info.streams.len();
+                                let stream_id = elementary_pid as isize;
+                                let stream_idx = info.streams.len();
 
-                                    info.streams.push(stream);
-                                }
+                                stream.id = stream_id;
+                                stream.index = stream_idx;
+
+                                info.streams.push(stream);
+
+                                self.pid_to_stream_index.insert(stream_id as u16, stream_idx);
 
                                 pos += 5 + es_info_length;
                             }
@@ -150,7 +146,58 @@ impl Demuxer for MpegTsDemuxer {
     }
 
     fn read_event(&mut self, buf: &mut dyn Buffered) -> Result<(std::io::SeekFrom, Event)> {
-        todo!()
+        const TS_PACKET_SIZE: usize = 188;
+        let mut packet_buf = [0u8; TS_PACKET_SIZE];
+
+        // Read exactly 188 byte(s) from buffer into packet_buf
+        let bytes_read = match buf.read(&mut packet_buf[..]) {
+            Ok(n) if n == 0 => return Ok((std::io::SeekFrom::Current(0), Event::Eof)),
+            Ok(n) if n < TS_PACKET_SIZE => {
+                return Ok((
+                    std::io::SeekFrom::Current(0),
+                    Event::MoreDataNeeded(TS_PACKET_SIZE - n)
+                ));
+            },
+            Ok(n) => n,
+            Err(e) => return Err(Error::Io(e)),
+        };
+
+        // Check 0x47 sync byte
+        if packet_buf[0] != 0x47 {
+            let backtrack: i64 = -((bytes_read as i64) -1);
+            return Ok((std::io::SeekFrom::Current(backtrack), Event::Continue));
+        }
+
+        // TS packet parsing
+        let pkt = match TsPacket::parse(&packet_buf) {
+            Ok(p) => p,
+            Err(_) => {
+                // In case of synchronizing error, advance of one byte or skip
+                let backtrack: i64 = -((bytes_read as i64) -1);
+                return Ok((std::io::SeekFrom::Current(backtrack), Event::Continue));
+            }
+        };
+
+        let pid = pkt.header.pid.value();
+
+        if let Some(payload) = pkt.payload {
+            if pkt.header.has_payload && !payload.is_empty() {
+                if let Some(&stream_idx) = self.pid_to_stream_index.get(&pid) {
+                    let mut av_pkt = Packet::default();
+                    av_pkt.data = payload.to_vec();
+                    av_pkt.stream_index = stream_idx as isize;
+
+                    // We return Current(0) because buf.read() has already consumed the 188 bytes
+                    return Ok((
+                        std::io::SeekFrom::Current(0),
+                        Event::NewPacket(av_pkt),
+                    ));
+                }
+            }
+        }
+
+        // The same applies for ignored packets (PAT/PMT/NULL), buf.read() has already advanced the cursors
+        Ok((std::io::SeekFrom::Current(0), Event::Continue))
     }
 }
 
@@ -159,7 +206,8 @@ impl Descriptor for MpegTsDes {
 
     fn create(&self) -> Self::OutputDemuxer {
         MpegTsDemuxer {
-            pending_packets: VecDeque::with_capacity(1024),
+            _pending_packets: VecDeque::with_capacity(1024),
+            pid_to_stream_index: HashMap::new(),
         }
     }
 
