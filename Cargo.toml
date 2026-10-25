@@ -3,8 +3,12 @@ name = "av-mpeg-ts"
 version = "0.1.0"
 edition = "2024"
 
+[[example]]
+name = "hlsreader_simple"
+path = "examples/hls_reader/hls_reader_simple.rs"
+
 [dependencies]
 av-data = "0.4.4"
-av-format = "0.7.1"
+av-format = { git = "https://github.com/aculnaig/rust-av.git", tag = "0.1.0-alpha1" }
 log = "0.4.34"
 mpeg-ts = "0.6.2"

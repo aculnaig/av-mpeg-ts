@@ -49,11 +49,13 @@ impl Demuxer for MpegTsDemuxer {
                         pat_reassembler.feed(payload, pkt.header.pusi);
 
                         while let Some(section) = pat_reassembler.pop_section() {
-                            if section.len() >= 8 {
+                            if section.len() >= 16 {
                                 pmt_pid = Some(u16::from_be_bytes([
-                                    section[section.len() - 4] & 0x1F,
-                                    section[section.len() - 3],
+                                    section[section.len() - 6] & 0x1F,
+                                    section[section.len() - 5],
                                 ]));
+
+                                log::trace!("PMT PID found: 0x{:04X}", pmt_pid.unwrap());
                             }
                         }
                     }
