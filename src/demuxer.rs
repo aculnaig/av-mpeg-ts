@@ -1,7 +1,16 @@
 use std::collections::VecDeque;
 
-use av_data::{params::{AudioInfo, CodecParams, MediaKind, VideoInfo}, rational::Rational64};
-use av_format::{buffer::Buffered, common::GlobalInfo, demuxer::{Demuxer, Descr, Descriptor, Event}, error::Result, stream::Stream};
+use av_data::{
+    params::{AudioInfo, CodecParams, MediaKind, VideoInfo},
+    rational::Rational64,
+};
+use av_format::{
+    buffer::Buffered,
+    common::GlobalInfo,
+    demuxer::{Demuxer, Descr, Descriptor, Event},
+    error::Result,
+    stream::Stream,
+};
 use mpeg_ts::{OwnedTsPacket, TsPacket, ts::SectionReassembler};
 
 pub struct MpegTsDes {
@@ -12,8 +21,12 @@ pub struct MpegTsDemuxer {
     pending_packets: VecDeque<OwnedTsPacket>,
 }
 
-impl Demuxer for MpegTsDemuxer{
-    fn read_headers(&mut self, buf: &mut dyn Buffered, info: &mut GlobalInfo) -> Result<std::io::SeekFrom> {
+impl Demuxer for MpegTsDemuxer {
+    fn read_headers(
+        &mut self,
+        buf: &mut dyn Buffered,
+        info: &mut GlobalInfo,
+    ) -> Result<std::io::SeekFrom> {
         const TS_PACKET_SIZE: usize = 188;
         let mut pat_reassembler = SectionReassembler::default();
         let mut pmt_pid: Option<u16> = None;
@@ -37,17 +50,20 @@ impl Demuxer for MpegTsDemuxer{
 
                         while let Some(section) = pat_reassembler.pop_section() {
                             if section.len() >= 8 {
-                                pmt_pid = Some(u16::from_be_bytes([section[section.len() - 4] & 0x1F, section[section.len() - 3]]));
+                                pmt_pid = Some(u16::from_be_bytes([
+                                    section[section.len() - 4] & 0x1F,
+                                    section[section.len() - 3],
+                                ]));
                             }
                         }
                     }
-                }
-                else if Some(pid) == pmt_pid {
+                } else if Some(pid) == pmt_pid {
                     if let Some(payload) = pkt.payload {
                         pmt_reassemlber.feed(payload, pkt.header.pusi);
 
-                        while let Some(section) = pmt_reassemlber.pop_section()  {
-                            let program_info_length = (((section[10] as usize) & 0x0F) << 8) | (section[11] as usize);
+                        while let Some(section) = pmt_reassemlber.pop_section() {
+                            let program_info_length =
+                                (((section[10] as usize) & 0x0F) << 8) | (section[11] as usize);
 
                             let mut pos = 12 + program_info_length;
 
@@ -55,8 +71,10 @@ impl Demuxer for MpegTsDemuxer{
 
                             while pos + 5 <= end {
                                 let stream_type = section[pos];
-                                let elementary_pid = (((section[pos + 1] as usize) & 0x1F) << 8) | (section[pos + 2] as usize);
-                                let es_info_length = (((section[pos + 3] as usize) & 0x0F) << 8) | (section[pos + 4] as usize);
+                                let elementary_pid = (((section[pos + 1] as usize) & 0x1F) << 8)
+                                    | (section[pos + 2] as usize);
+                                let es_info_length = (((section[pos + 3] as usize) & 0x0F) << 8)
+                                    | (section[pos + 4] as usize);
 
                                 let mut params = CodecParams {
                                     kind: None,
@@ -71,7 +89,10 @@ impl Demuxer for MpegTsDemuxer{
 
                                 match stream_type {
                                     0x1B => {
-                                        log::trace!("Found H.264 (AVC) video, pid: 0x{:04X}", elementary_pid);
+                                        log::trace!(
+                                            "Found H.264 (AVC) video, pid: 0x{:04X}",
+                                            elementary_pid
+                                        );
 
                                         params.codec_id = Some("H264".to_string());
                                         params.kind = Some(MediaKind::Video(VideoInfo {
@@ -79,10 +100,13 @@ impl Demuxer for MpegTsDemuxer{
                                             height: 0,
                                             format: None,
                                         }));
-                                    },
+                                    }
 
                                     0x0F => {
-                                        log::trace!("Found AAC audio, pid: 0x{:04X}", elementary_pid);
+                                        log::trace!(
+                                            "Found AAC audio, pid: 0x{:04X}",
+                                            elementary_pid
+                                        );
 
                                         params.codec_id = Some("AAC".to_string());
                                         params.kind = Some(MediaKind::Audio(AudioInfo {
@@ -90,7 +114,7 @@ impl Demuxer for MpegTsDemuxer{
                                             map: None,
                                             format: None,
                                         }));
-                                    },
+                                    }
                                     _ => {
                                         supported = false;
                                         unimplemented!();
@@ -167,7 +191,7 @@ impl Descriptor for MpegTsDes {
         }
 
         if valid_packets >= 4 {
-                90
+            90
         } else if valid_packets >= 3 {
             70
         } else {
@@ -177,5 +201,11 @@ impl Descriptor for MpegTsDes {
 }
 
 pub const MPEGTS_DES: &dyn Descriptor<OutputDemuxer = MpegTsDemuxer> = &MpegTsDes {
-    d: Descr { name: "mpeg-ts", demuxer: "mpeg-ts", description: "MPEG-TS demuxer", extensions: &["ts", "m2ts", "mts"], mime: &["video/mp2t", "video/mpeg", "application/mp2t"] }
+    d: Descr {
+        name: "mpeg-ts",
+        demuxer: "mpeg-ts",
+        description: "MPEG-TS demuxer",
+        extensions: &["ts", "m2ts", "mts"],
+        mime: &["video/mp2t", "video/mpeg", "application/mp2t"],
+    },
 };
